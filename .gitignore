@@ -1,0 +1,58 @@
+# Python y entornos virtuales
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Entornos Virtuales
+venv/
+.venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Compilación EXE (PyInstaller)
+*.spec
+build_exe/
+_internal/
+
+# Bases de datos y archivos locales sensibles
+*.db
+*.sqlite3
+data/
+backups/
+
+# Logs
+*.log
+
+# Caches e IDEs
+.vscode/
+.idea/
+.claude/
+.qodo/
+
+# Salidas y backups temporales
+*.txt
+!requirements.txt
+!README_BUILD_SIGEDTA.txt
+*.zip
+*.rar
+*.pkg
+*.html
+*.exe
