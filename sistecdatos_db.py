@@ -4,6 +4,7 @@
 
 import sqlite3
 import os
+import sys
 from datetime import datetime, timedelta
 import shutil
 import hashlib
@@ -13,8 +14,20 @@ import time
 import logging
 from logging.handlers import RotatingFileHandler
 
+# ---- Resolución de ruta base compatible con PyInstaller (one-file y dev) ----
+def _get_base_dir():
+    """Retorna el directorio base correcto tanto en modo script como en exe compilado."""
+    if getattr(sys, 'frozen', False):
+        # Exe instalado: usar %APPDATA%\SISTECDATOSFEMA (siempre escribible por el usuario)
+        return os.path.join(os.environ.get('APPDATA', os.path.expanduser('~')), 'SISTECDATOSFEMA')
+    else:
+        # Modo desarrollo: usar directorio del script
+        return os.path.dirname(os.path.abspath(__file__))
+
+_BASE_DIR = _get_base_dir()
+
 # ---- Configuración de logging centralizado ----
-_log_dir = os.path.join(os.path.dirname(__file__), "data", "logs")
+_log_dir = os.path.join(_BASE_DIR, "data", "logs")
 os.makedirs(_log_dir, exist_ok=True)
 _log_file = os.path.join(_log_dir, "sistecdatos.log")
 
@@ -35,12 +48,19 @@ class SISTECDATOSFEMADatabase:
 
     def __init__(self, db_name="sistecdatos_dictamenes.db"):
         # Carpeta de datos y backups
-        self.data_dir = os.path.join(os.path.dirname(__file__), "data")
+        self.data_dir = os.path.join(_BASE_DIR, "data")
         self.backup_dir = os.path.join(self.data_dir, "backups")
         os.makedirs(self.data_dir, exist_ok=True)
         os.makedirs(self.backup_dir, exist_ok=True)
         
         self.db_path = os.path.join(self.data_dir, db_name)
+
+        # Migración automática: copiar BD existente de la carpeta del exe si aún no existe
+        if getattr(sys, 'frozen', False) and not os.path.exists(self.db_path):
+            old_db = os.path.join(os.path.dirname(sys.executable), 'data', db_name)
+            if os.path.exists(old_db):
+                shutil.copy2(old_db, self.db_path)
+
         self.current_user = None
         self.session_start = None
         self.backup_timer = None
