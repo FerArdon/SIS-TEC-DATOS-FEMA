@@ -19,6 +19,10 @@ from datetime import datetime
 from PIL import Image, ImageTk
 from tkcalendar import Calendar
 import logging
+import matplotlib
+matplotlib.use("TkAgg")
+from matplotlib.figure import Figure
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
 logger = logging.getLogger("sistecdatos.main")
 
@@ -190,15 +194,20 @@ class SISTECDATOSFEMAApp(ctk.CTk):
         
         self.tabview = ctk.CTkTabview(main_content)
         self.tabview.grid(row=0, column=0, sticky="nsew")
-        
+
+        self.tabview.add("📊 Dashboard")
         self.tabview.add("Ingreso y Edición")
         self.tabview.add("Directorio de Expedientes (Búsqueda)")
-        
+
+        tab_dash = self.tabview.tab("📊 Dashboard")
+        tab_dash.grid_rowconfigure(0, weight=1)
+        tab_dash.grid_columnconfigure(0, weight=1)
+
         tab_form = self.tabview.tab("Ingreso y Edición")
         tab_form.grid_rowconfigure(0, weight=1)
         tab_form.grid_rowconfigure(1, weight=0)
         tab_form.grid_columnconfigure(0, weight=1)
-        
+
         tab_list = self.tabview.tab("Directorio de Expedientes (Búsqueda)")
         tab_list.grid_rowconfigure(0, weight=1)
         tab_list.grid_columnconfigure(0, weight=1)
@@ -350,6 +359,200 @@ class SISTECDATOSFEMAApp(ctk.CTk):
         
         # Inicializar el comportamiento del Combobox Unidad basado en el tipo por defecto
         self.actualizar_unidad_categoria()
+
+        # ------ DASHBOARD (primera pestaña) ------
+        self._dash_fig = None
+        self._build_dashboard(tab_dash)
+
+    def _build_dashboard(self, tab):
+        """Construye la pestaña de Dashboard con KPIs y gráficas."""
+        tab.grid_rowconfigure(0, weight=0)
+        tab.grid_rowconfigure(1, weight=1)
+        tab.grid_columnconfigure(0, weight=1)
+
+        # Barra superior con botón actualizar
+        top_bar = ctk.CTkFrame(tab, fg_color="transparent")
+        top_bar.grid(row=0, column=0, sticky="ew", padx=15, pady=(8, 0))
+        ctk.CTkButton(top_bar, text="↻  Actualizar", width=130, height=28,
+                      command=self._refresh_dashboard,
+                      fg_color=self.styles.get_colors()["accent"]).pack(side="right")
+
+        # Contenedor principal con scroll
+        outer = ctk.CTkFrame(tab, fg_color="transparent")
+        outer.grid(row=1, column=0, sticky="nsew", padx=15, pady=(5, 10))
+        outer.grid_rowconfigure(0, weight=0)  # KPIs
+        outer.grid_rowconfigure(1, weight=1)  # Charts
+        outer.grid_columnconfigure(0, weight=1)
+
+        self._dash_kpi_frame = ctk.CTkFrame(outer, fg_color="transparent")
+        self._dash_kpi_frame.grid(row=0, column=0, sticky="ew", pady=(0, 8))
+
+        self._dash_charts_frame = ctk.CTkFrame(outer, fg_color="transparent")
+        self._dash_charts_frame.grid(row=1, column=0, sticky="nsew")
+        self._dash_charts_frame.grid_columnconfigure(0, weight=1)
+        self._dash_charts_frame.grid_rowconfigure(0, weight=1)
+
+        self._refresh_dashboard()
+
+    def _refresh_dashboard(self):
+        """Recarga todos los datos y gráficas del dashboard."""
+        for w in self._dash_kpi_frame.winfo_children():
+            w.destroy()
+        for w in self._dash_charts_frame.winfo_children():
+            w.destroy()
+        if self._dash_fig is not None:
+            self._dash_fig.clf()
+            self._dash_fig = None
+
+        try:
+            self._render_dash_kpis()
+            self._render_dash_charts()
+        except Exception as e:
+            logger.error(f"Error al renderizar dashboard: {e}")
+            ctk.CTkLabel(self._dash_kpi_frame,
+                         text=f"Error cargando dashboard: {e}",
+                         text_color="red").grid(row=0, column=0, padx=10, pady=10)
+
+    def _render_dash_kpis(self):
+        """Renderiza las 4 tarjetas KPI."""
+        colors = self.styles.get_colors()
+        conn = self.db.conn
+        anio_actual = str(datetime.now().year)
+
+        total = conn.execute(
+            "SELECT COUNT(*) FROM dictamenes WHERE activo=1"
+        ).fetchone()[0]
+        finalizados = conn.execute(
+            "SELECT COUNT(*) FROM dictamenes WHERE activo=1 AND estado_dictamen LIKE '%Finalizado%'"
+        ).fetchone()[0]
+        en_proceso = conn.execute(
+            "SELECT COUNT(*) FROM dictamenes WHERE activo=1 AND (estado_dictamen NOT LIKE '%Finalizado%' OR estado_dictamen IS NULL)"
+        ).fetchone()[0]
+        este_anio = conn.execute(
+            "SELECT COUNT(*) FROM dictamenes WHERE activo=1 AND substr(fecha,7,4)=?",
+            (anio_actual,)
+        ).fetchone()[0]
+
+        kpis = [
+            ("📋", str(total),       "Total Dictámenes",  "#005FB8"),
+            ("✅", str(finalizados), "Finalizados",       "#28a745"),
+            ("🔄", str(en_proceso),  "En Proceso",        "#fd7e14"),
+            ("📅", str(este_anio),   f"Año {anio_actual}", "#6200ee"),
+        ]
+
+        for i in range(len(kpis)):
+            self._dash_kpi_frame.grid_columnconfigure(i, weight=1)
+
+        for i, (icon, valor, label, color) in enumerate(kpis):
+            card = ctk.CTkFrame(self._dash_kpi_frame, corner_radius=12,
+                                fg_color=colors["surface"],
+                                border_width=2, border_color=color)
+            card.grid(row=0, column=i, padx=8, pady=4, sticky="ew")
+            card.grid_columnconfigure(0, weight=1)
+            ctk.CTkLabel(card, text=icon,
+                         font=ctk.CTkFont(size=26)).grid(row=0, column=0, pady=(12, 2))
+            ctk.CTkLabel(card, text=valor,
+                         font=ctk.CTkFont(size=34, weight="bold"),
+                         text_color=color).grid(row=1, column=0, pady=2)
+            ctk.CTkLabel(card, text=label,
+                         font=ctk.CTkFont(size=11),
+                         text_color=colors["fg"]).grid(row=2, column=0, pady=(2, 12))
+
+    def _render_dash_charts(self):
+        """Renderiza las 3 gráficas matplotlib."""
+        colors = self.styles.get_colors()
+        is_dark = ctk.get_appearance_mode() == "Dark"
+        bg   = colors["bg"]
+        fg   = colors["fg"]
+        surf = colors["surface"]
+        acc  = colors["accent"]
+        border = "#43474E" if is_dark else "#D1D9E0"
+
+        conn = self.db.conn
+        por_anio = conn.execute(
+            "SELECT substr(fecha,7,4) as y, COUNT(*) FROM dictamenes "
+            "WHERE activo=1 AND length(fecha)=10 GROUP BY y ORDER BY y"
+        ).fetchall()
+        por_delito = conn.execute(
+            "SELECT delito, COUNT(*) as c FROM dictamenes "
+            "WHERE activo=1 AND delito IS NOT NULL AND delito!='' "
+            "GROUP BY delito ORDER BY c DESC LIMIT 6"
+        ).fetchall()
+        por_estado = conn.execute(
+            "SELECT estado_dictamen, COUNT(*) as c FROM dictamenes "
+            "WHERE activo=1 AND estado_dictamen IS NOT NULL AND estado_dictamen!='' "
+            "GROUP BY estado_dictamen ORDER BY c DESC"
+        ).fetchall()
+
+        palette = ["#005FB8","#28a745","#fd7e14","#dc3545","#6200ee","#17a2b8"]
+
+        fig = Figure(figsize=(13, 4.2), facecolor=bg)
+        self._dash_fig = fig
+
+        # --- Gráfica 1: Por Año ---
+        ax1 = fig.add_subplot(131)
+        ax1.set_facecolor(surf)
+        if por_anio:
+            anios = [r[0] for r in por_anio]
+            cnts  = [r[1] for r in por_anio]
+            bars = ax1.bar(anios, cnts, color=acc, alpha=0.85, edgecolor="none")
+            for bar, cnt in zip(bars, cnts):
+                ax1.text(bar.get_x() + bar.get_width()/2,
+                         bar.get_height() + 0.15, str(cnt),
+                         ha="center", va="bottom", fontsize=9, color=fg)
+        ax1.set_title("Dictámenes por Año", color=fg, fontsize=10, fontweight="bold", pad=8)
+        ax1.tick_params(colors=fg, labelsize=8)
+        for sp in ax1.spines.values():
+            sp.set_color(border)
+        for lbl in ax1.get_xticklabels():
+            lbl.set_rotation(45)
+
+        # --- Gráfica 2: Tipos de delito (donut) ---
+        ax2 = fig.add_subplot(132)
+        ax2.set_facecolor(bg)
+        if por_delito:
+            labels = [r[0][:24]+"…" if len(r[0])>24 else r[0] for r in por_delito]
+            sizes  = [r[1] for r in por_delito]
+            wedges, _, autotexts = ax2.pie(
+                sizes, labels=None, autopct="%1.0f%%",
+                colors=palette[:len(sizes)], startangle=90,
+                pctdistance=0.78,
+                wedgeprops=dict(edgecolor=bg, linewidth=2)
+            )
+            # Donut: círculo central
+            ax2.add_artist(plt := __import__("matplotlib.patches", fromlist=["Circle"]).Circle(
+                (0, 0), 0.52, color=bg))
+            for at in autotexts:
+                at.set_fontsize(8)
+                at.set_color("white")
+            ax2.legend(labels, loc="lower center", bbox_to_anchor=(0.5, -0.42),
+                       fontsize=7, ncol=2, framealpha=0,
+                       labelcolor=fg)
+        ax2.set_title("Tipos de Delito", color=fg, fontsize=10, fontweight="bold", pad=8)
+
+        # --- Gráfica 3: Por estado (barras horizontales) ---
+        ax3 = fig.add_subplot(133)
+        ax3.set_facecolor(surf)
+        if por_estado:
+            estados = [r[0][:22]+"…" if len(r[0])>22 else r[0] for r in por_estado]
+            cnts    = [r[1] for r in por_estado]
+            bars = ax3.barh(estados, cnts,
+                            color=palette[:len(estados)], alpha=0.85, edgecolor="none")
+            for bar, cnt in zip(bars, cnts):
+                ax3.text(bar.get_width() + 0.15,
+                         bar.get_y() + bar.get_height()/2,
+                         str(cnt), va="center", fontsize=9, color=fg)
+        ax3.set_title("Estado de los Casos", color=fg, fontsize=10, fontweight="bold", pad=8)
+        ax3.tick_params(colors=fg, labelsize=8)
+        for sp in ax3.spines.values():
+            sp.set_color(border)
+        ax3.invert_yaxis()
+
+        fig.tight_layout(pad=1.8)
+
+        canvas = FigureCanvasTkAgg(fig, master=self._dash_charts_frame)
+        canvas.draw()
+        canvas.get_tk_widget().grid(row=0, column=0, sticky="nsew")
 
     def _crear_menu(self):
         """Crea el menú tradicional de Windows"""
@@ -745,6 +948,7 @@ class SISTECDATOSFEMAApp(ctk.CTk):
             return
         self.statusbar['text'] = _("dictamen_guardado")
         self._load_data()
+        self._refresh_dashboard()
         self.clear_form()
 
     def export_excel(self):
@@ -982,6 +1186,7 @@ class SISTECDATOSFEMAApp(ctk.CTk):
         if messagebox.askyesno(_("delete"), _("confirmar_eliminar")):
             self.logic.eliminar_dictamen(dictamen_num)
             self._load_data()
+            self._refresh_dashboard()
             self.statusbar.configure(text=_("delete") + f" {dictamen_num}")
 
     def visualizar_seleccionado(self, event=None):
